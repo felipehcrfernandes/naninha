@@ -1,6 +1,7 @@
-import { StyleSheet } from 'react-native';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { StyleSheet, View } from 'react-native';
 
-import { Text, View } from '@/components/Themed';
+import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 
@@ -10,7 +11,7 @@ export default function HistoryScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Text style={[styles.icon]}>📋</Text>
+      <FontAwesome name="list-ul" size={64} color={colors.textSecondary} />
       <Text style={[styles.title, { color: colors.text }]}>Histórico</Text>
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
         Em breve você verá o histórico de sonecas aqui
@@ -26,13 +27,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  icon: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
   title: {
     fontSize: 24,
     fontWeight: '600',
+    marginTop: 16,
     marginBottom: 8,
   },
   subtitle: {
