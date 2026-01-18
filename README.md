@@ -25,7 +25,8 @@ naninha/
 │   ├── (tabs)/            # Tab-based navigation
 │   │   ├── _layout.tsx    # Tab navigator configuration
 │   │   ├── index.tsx      # Nap Tracker screen (main UI)
-│   │   └── two.tsx        # History screen (placeholder)
+│   │   ├── history.tsx    # History screen (placeholder)
+│   │   └── profile.tsx    # Profile screen (placeholder)
 │   ├── _layout.tsx        # Root layout with providers
 │   ├── +html.tsx          # Web HTML template
 │   └── +not-found.tsx     # 404 screen
