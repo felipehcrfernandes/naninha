@@ -118,6 +118,40 @@ export default function NapTrackerScreen() {
     };
   }, []);
 
+  // Save nap to database
+  const saveNap = async ({
+    babyId,
+    startTime,
+    endTime,
+    durationSeconds,
+    notes,
+  }: {
+    babyId: string;
+    startTime: Date;
+    endTime: Date;
+    durationSeconds: number;
+    notes: string | null;
+  }) => {
+    try {
+      const { error } = await supabase.from('naps').insert({
+        baby_id: babyId,
+        started_by: user?.id,
+        start_time: startTime.toISOString(),
+        end_time: endTime.toISOString(),
+        duration_seconds: durationSeconds,
+        notes,
+      });
+
+      if (error) {
+        console.error('Error saving nap:', error);
+      } else {
+        console.log('Nap saved successfully');
+      }
+    } catch (error) {
+      console.error('Error saving nap:', error);
+    }
+  };
+
   // Get current baby and its nap state
   const currentBaby = babies[currentBabyIndex];
   const currentNapState = currentBaby ? napStates[currentBaby.id] : null;
@@ -135,14 +169,19 @@ export default function NapTrackerScreen() {
         clearInterval(state.intervalId);
       }
 
-      console.log('Nap ended:', {
-        babyId,
-        babyName: currentBaby.name,
-        duration: state.elapsedSeconds,
-        notes: state.notes,
-        startTime: state.startTime,
-        endTime: new Date(),
-      });
+      const endTime = new Date();
+      const startTime = state.startTime;
+
+      // Save nap to database
+      if (startTime && state.elapsedSeconds > 0) {
+        saveNap({
+          babyId,
+          startTime,
+          endTime,
+          durationSeconds: state.elapsedSeconds,
+          notes: state.notes || null,
+        });
+      }
 
       setNapStates((prev) => ({
         ...prev,
