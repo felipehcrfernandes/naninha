@@ -1,5 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import React, { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +15,14 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+interface Baby {
+  id: string;
+  name: string;
+  birth_date: string | null;
+  gender: 'masculino' | 'feminino';
+}
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -24,6 +33,48 @@ export default function ProfileScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [babies, setBabies] = useState<Baby[]>([]);
+  const [loadingBabies, setLoadingBabies] = useState(true);
+
+  // Fetch babies when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchBabies();
+    }, [user?.id])
+  );
+
+  const fetchBabies = async () => {
+    if (!user?.id) return;
+
+    setLoadingBabies(true);
+    try {
+      const { data, error } = await supabase
+        .from('baby_caregivers')
+        .select(`
+          baby_id,
+          babies (
+            id,
+            name,
+            birth_date,
+            gender
+          )
+        `)
+        .eq('profile_id', user.id)
+        .eq('is_active', true);
+
+      if (error) throw error;
+
+      const babyList = data
+        ?.map((item: any) => item.babies)
+        .filter(Boolean) as Baby[];
+      
+      setBabies(babyList ?? []);
+    } catch (error) {
+      console.error('Error fetching babies:', error);
+    } finally {
+      setLoadingBabies(false);
+    }
+  };
 
   const handleSaveName = async () => {
     if (!name.trim()) {
@@ -81,10 +132,30 @@ export default function ProfileScreen() {
   };
 
   const handleAddBaby = () => {
-    Alert.alert(
-      'Em breve',
-      'A funcionalidade de adicionar bebê será implementada em breve!'
-    );
+    router.push('/(tabs)/add-baby');
+  };
+
+  const calculateAge = (birthDate: string | null): string => {
+    if (!birthDate) return '';
+    
+    const birth = new Date(birthDate);
+    const now = new Date();
+    const months = (now.getFullYear() - birth.getFullYear()) * 12 + 
+                   (now.getMonth() - birth.getMonth());
+    
+    if (months < 1) {
+      const days = Math.floor((now.getTime() - birth.getTime()) / (1000 * 60 * 60 * 24));
+      return `${days} dias`;
+    } else if (months < 12) {
+      return `${months} ${months === 1 ? 'mês' : 'meses'}`;
+    } else {
+      const years = Math.floor(months / 12);
+      const remainingMonths = months % 12;
+      if (remainingMonths === 0) {
+        return `${years} ${years === 1 ? 'ano' : 'anos'}`;
+      }
+      return `${years}a ${remainingMonths}m`;
+    }
   };
 
   return (
@@ -174,6 +245,38 @@ export default function ProfileScreen() {
             Bebês
           </Text>
         </View>
+
+        {/* Baby List */}
+        {loadingBabies ? (
+          <ActivityIndicator size="small" color={colors.tint} style={{ marginVertical: 16 }} />
+        ) : (
+          <>
+            {babies.map((baby) => (
+              <View
+                key={baby.id}
+                style={[styles.babyItem, { borderColor: colors.border }]}
+              >
+                <View style={[styles.babyIcon, { backgroundColor: baby.gender === 'masculino' ? '#E3F2FD' : '#FCE4EC' }]}>
+                  <FontAwesome
+                    name={baby.gender === 'masculino' ? 'mars' : 'venus'}
+                    size={16}
+                    color={baby.gender === 'masculino' ? '#1976D2' : '#C2185B'}
+                  />
+                </View>
+                <View style={styles.babyInfo}>
+                  <Text style={[styles.babyName, { color: colors.text }]}>
+                    {baby.name}
+                  </Text>
+                  {baby.birth_date && (
+                    <Text style={[styles.babyAge, { color: colors.textSecondary }]}>
+                      {calculateAge(baby.birth_date)}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </>
+        )}
 
         <Pressable
           style={[styles.addBabyButton, { borderColor: colors.tint }]}
@@ -301,6 +404,31 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
+  babyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  babyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  babyInfo: {
+    flex: 1,
+  },
+  babyName: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  babyAge: {
+    fontSize: 13,
+    marginTop: 2,
+  },
   addBabyButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -310,6 +438,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
+    marginTop: 12,
   },
   addBabyText: {
     fontSize: 15,

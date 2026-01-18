@@ -55,7 +55,14 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <TabBarIcon name="list-ul" color={color} />,
         }}
       />
-
+      <Tabs.Screen
+        name="add-baby"
+        options={{
+          title: 'Adicionar Bebê',
+          href: null, // Hide from tab bar
+          headerShown: true,
+        }}
+      />
     </Tabs>
   );
 }
