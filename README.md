@@ -19,6 +19,7 @@ Naninha helps caregivers track their baby's naps with an intuitive and calming i
 | FontAwesome | via @expo/vector-icons | Icon library |
 | Supabase | - | Authentication and database |
 | AsyncStorage | - | Local session persistence |
+| React Native Chart Kit | - | Charts and data visualization |
 
 ## Project Structure
 
@@ -33,7 +34,7 @@ naninha/
 │   │   ├── _layout.tsx    # Tab navigator configuration
 │   │   ├── index.tsx      # Nap Tracker screen (main UI)
 │   │   ├── history.tsx    # Nap history with records
-│   │   ├── dashboard.tsx  # Dashboard (placeholder)
+│   │   ├── dashboard.tsx  # Dashboard with sleep analytics
 │   │   ├── profile.tsx    # User profile screen
 │   │   └── add-baby.tsx   # Add baby form
 │   ├── _layout.tsx        # Root layout with providers
@@ -97,16 +98,18 @@ naninha/
 - Display start time, end time, duration, and notes
 - Visual empty state when no records exist
 
+#### Dashboard
+- Custom date range filter (start and end date)
+- Line chart showing total sleep hours per day
+- Average statistics: daily average, daytime average, nighttime average
+- Baby selector for multi-baby households
+- Daytime (6h-18h) and nighttime (18h-6h) sleep separation
+
 #### Theming
 - Light and dark mode support
 - Calming color palette designed for baby apps
 
 ### Planned Features
-
-- **Dashboard**
-  - Total sleep chart for period
-  - Daytime sleep analytics
-  - Nighttime sleep analytics
 
 - **Multi-Caregiver Sync**
   - Real-time sync between caregivers
