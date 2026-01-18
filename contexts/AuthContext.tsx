@@ -19,6 +19,8 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  updateProfile: (name: string) => Promise<{ error: Error | null }>;
+  deleteAccount: () => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -107,6 +109,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   };
 
+  // Update profile name
+  const updateProfile = async (name: string) => {
+    if (!user) return { error: new Error('No user logged in') };
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ name, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    if (!error) {
+      setProfile((prev) => (prev ? { ...prev, name } : null));
+    }
+
+    return { error: error as Error | null };
+  };
+
+  // Delete account
+  const deleteAccount = async () => {
+    if (!user) return { error: new Error('No user logged in') };
+
+    // Delete profile first (cascade should handle this, but being explicit)
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', user.id);
+
+    if (profileError) {
+      return { error: profileError as Error };
+    }
+
+    // Sign out (account deletion requires server-side admin API)
+    // For now, we sign out - full deletion requires Edge Function
+    await supabase.auth.signOut();
+    setProfile(null);
+
+    return { error: null };
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -117,6 +157,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUp,
         signIn,
         signOut,
+        updateProfile,
+        deleteAccount,
       }}
     >
       {children}
