@@ -1,7 +1,7 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, View, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator, TextInput } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
+import { StyleSheet, View, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
+import { PieChart, LineChart } from 'react-native-chart-kit';
 import { useFocusEffect } from 'expo-router';
 
 import { Text } from '@/components/Themed';
@@ -15,6 +15,7 @@ const screenWidth = Dimensions.get('window').width;
 interface Baby {
   id: string;
   name: string;
+  birth_date: string | null;
 }
 
 interface NapRecord {
@@ -25,55 +26,7 @@ interface NapRecord {
   notes: string | null;
 }
 
-interface DailyData {
-  date: string;
-  totalMinutes: number;
-  dayMinutes: number;
-  nightMinutes: number;
-}
-
-// Helper to format date as DD/MM/YYYY
-const formatDateDisplay = (date: Date): string => {
-  const day = date.getDate().toString().padStart(2, '0');
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
-};
-
-// Helper to parse DD/MM/YYYY to Date
-const parseDateInput = (input: string): Date | null => {
-  const parts = input.split('/');
-  if (parts.length !== 3) return null;
-  
-  const day = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const year = parseInt(parts[2], 10);
-  
-  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
-  if (day < 1 || day > 31 || month < 0 || month > 11 || year < 2020) return null;
-  
-  return new Date(year, month, day);
-};
-
-// Format input with mask DD/MM/YYYY
-const formatDateMask = (text: string): string => {
-  const numbers = text.replace(/\D/g, '');
-  let formatted = '';
-  
-  if (numbers.length > 0) {
-    formatted = numbers.slice(0, 2);
-  }
-  if (numbers.length > 2) {
-    formatted += '/' + numbers.slice(2, 4);
-  }
-  if (numbers.length > 4) {
-    formatted += '/' + numbers.slice(4, 8);
-  }
-  
-  return formatted;
-};
-
-// Colors for stacked chart
+// Colors for chart
 const DAY_COLOR = '#F4A896'; // Coral - same as "Parar Soneca" button
 const NIGHT_COLOR = '#7C9CBF'; // Blue - sleeping color
 
@@ -82,50 +35,18 @@ export default function DashboardScreen() {
   const colors = Colors[colorScheme];
   const { user } = useAuth();
 
-  // Default: last 7 days
-  const getDefaultStartDate = () => {
-    const date = new Date();
-    date.setDate(date.getDate() - 7);
-    return date;
-  };
-
   const [babies, setBabies] = useState<Baby[]>([]);
   const [selectedBabyId, setSelectedBabyId] = useState<string | null>(null);
   const [napRecords, setNapRecords] = useState<NapRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dailyData, setDailyData] = useState<DailyData[]>([]);
-
-  // Date filter state
-  const [startDateInput, setStartDateInput] = useState(formatDateDisplay(getDefaultStartDate()));
-  const [endDateInput, setEndDateInput] = useState(formatDateDisplay(new Date()));
-  const [startDate, setStartDate] = useState<Date>(getDefaultStartDate());
-  const [endDate, setEndDate] = useState<Date>(new Date());
-
-  // Handle start date input change
-  const handleStartDateChange = (text: string) => {
-    const formatted = formatDateMask(text);
-    setStartDateInput(formatted);
-    
-    if (formatted.length === 10) {
-      const parsed = parseDateInput(formatted);
-      if (parsed) {
-        setStartDate(parsed);
-      }
-    }
-  };
-
-  // Handle end date input change
-  const handleEndDateChange = (text: string) => {
-    const formatted = formatDateMask(text);
-    setEndDateInput(formatted);
-    
-    if (formatted.length === 10) {
-      const parsed = parseDateInput(formatted);
-      if (parsed) {
-        setEndDate(parsed);
-      }
-    }
-  };
+  
+  // Aggregated stats
+  const [totalDayMinutes, setTotalDayMinutes] = useState(0);
+  const [totalNightMinutes, setTotalNightMinutes] = useState(0);
+  const [daysWithData, setDaysWithData] = useState(0);
+  
+  // Monthly data for line chart (by baby age)
+  const [monthlyData, setMonthlyData] = useState<{ ageLabel: string; dayAvg: number; nightAvg: number }[]>([]);
 
   // Fetch babies
   const fetchBabies = useCallback(async () => {
@@ -133,7 +54,7 @@ export default function DashboardScreen() {
 
     const { data, error } = await supabase
       .from('baby_caregivers')
-      .select('baby_id, babies(id, name)')
+      .select('baby_id, babies(id, name, birth_date)')
       .eq('profile_id', user.id)
       .eq('is_active', true);
 
@@ -152,7 +73,7 @@ export default function DashboardScreen() {
     }
   }, [user, selectedBabyId]);
 
-  // Fetch nap records
+  // Fetch ALL nap records for the baby
   const fetchNapRecords = useCallback(async () => {
     if (!user || !selectedBabyId) {
       setLoading(false);
@@ -161,19 +82,10 @@ export default function DashboardScreen() {
 
     setLoading(true);
 
-    // Set start of day for startDate and end of day for endDate
-    const queryStartDate = new Date(startDate);
-    queryStartDate.setHours(0, 0, 0, 0);
-    
-    const queryEndDate = new Date(endDate);
-    queryEndDate.setHours(23, 59, 59, 999);
-
     const { data, error } = await supabase
       .from('naps')
       .select('*')
       .eq('baby_id', selectedBabyId)
-      .gte('start_time', queryStartDate.toISOString())
-      .lte('start_time', queryEndDate.toISOString())
       .order('start_time', { ascending: true });
 
     if (error) {
@@ -183,9 +95,12 @@ export default function DashboardScreen() {
     }
 
     setNapRecords(data || []);
-    processData(data || [], queryStartDate, queryEndDate);
+    
+    // Get selected baby's birth date
+    const selectedBaby = babies.find(b => b.id === selectedBabyId);
+    processData(data || [], selectedBaby?.birth_date || null);
     setLoading(false);
-  }, [user, selectedBabyId, startDate, endDate]);
+  }, [user, selectedBabyId, babies]);
 
   // Helper to get local date key (YYYY-MM-DD) without timezone shift
   const getLocalDateKey = (date: Date): string => {
@@ -195,45 +110,68 @@ export default function DashboardScreen() {
     return `${year}-${month}-${day}`;
   };
 
-  // Process data for charts
-  const processData = (records: NapRecord[], queryStartDate: Date, queryEndDate: Date) => {
-    const dailyMap = new Map<string, DailyData>();
+  // Calculate baby's age in months at a given date
+  const getAgeInMonths = (birthDate: Date, targetDate: Date): number => {
+    const years = targetDate.getFullYear() - birthDate.getFullYear();
+    const months = targetDate.getMonth() - birthDate.getMonth();
+    return years * 12 + months;
+  };
 
-    // Initialize all days in range
-    const currentDate = new Date(queryStartDate);
-    while (currentDate <= queryEndDate) {
-      const dateKey = getLocalDateKey(currentDate);
-      dailyMap.set(dateKey, {
-        date: dateKey,
-        totalMinutes: 0,
-        dayMinutes: 0,
-        nightMinutes: 0,
-      });
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
+  // Process data to calculate totals and monthly averages by baby age
+  const processData = (records: NapRecord[], birthDateStr: string | null) => {
+    let dayMinutes = 0;
+    let nightMinutes = 0;
+    const uniqueDays = new Set<string>();
+    
+    // Monthly aggregation by baby age
+    const monthlyMap = new Map<number, { dayMinutes: number; nightMinutes: number; days: Set<string> }>();
+    
+    const birthDate = birthDateStr ? new Date(birthDateStr) : null;
 
-    // Process each nap record
     records.forEach((record) => {
       const start = new Date(record.start_time);
       const end = new Date(record.end_time);
       const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
       const dateKey = getLocalDateKey(start);
+      
+      uniqueDays.add(dateKey);
 
-      const existing = dailyMap.get(dateKey);
-      if (existing) {
-        existing.totalMinutes += durationMinutes;
+      // Calculate age in months if birth date is available
+      const ageMonth = birthDate ? getAgeInMonths(birthDate, start) : 0;
 
-        // Determine if daytime (6AM-6PM) or nighttime
-        const startHour = start.getHours();
-        if (startHour >= 6 && startHour < 18) {
-          existing.dayMinutes += durationMinutes;
-        } else {
-          existing.nightMinutes += durationMinutes;
-        }
+      // Initialize month if not exists
+      if (!monthlyMap.has(ageMonth)) {
+        monthlyMap.set(ageMonth, { dayMinutes: 0, nightMinutes: 0, days: new Set() });
+      }
+      const monthData = monthlyMap.get(ageMonth)!;
+      monthData.days.add(dateKey);
+
+      // Determine if daytime (6AM-6PM) or nighttime
+      const startHour = start.getHours();
+      if (startHour >= 6 && startHour < 18) {
+        dayMinutes += durationMinutes;
+        monthData.dayMinutes += durationMinutes;
+      } else {
+        nightMinutes += durationMinutes;
+        monthData.nightMinutes += durationMinutes;
       }
     });
 
-    setDailyData(Array.from(dailyMap.values()));
+    setTotalDayMinutes(dayMinutes);
+    setTotalNightMinutes(nightMinutes);
+    setDaysWithData(uniqueDays.size || 1);
+
+    // Convert monthly map to sorted array with averages
+    const monthlyArray = Array.from(monthlyMap.entries())
+      .sort(([a], [b]) => a - b)
+      .slice(-12) // Last 12 months
+      .map(([ageMonth, data]) => ({
+        ageLabel: `${ageMonth}m`,
+        dayAvg: (data.dayMinutes / 60) / (data.days.size || 1),
+        nightAvg: (data.nightMinutes / 60) / (data.days.size || 1),
+      }));
+
+    setMonthlyData(monthlyArray);
   };
 
   useFocusEffect(
@@ -246,58 +184,100 @@ export default function DashboardScreen() {
     fetchNapRecords();
   }, [fetchNapRecords]);
 
+  // Calculate averages
+  const totalMinutes = totalDayMinutes + totalNightMinutes;
+  const avgHoursPerDay = (totalMinutes / 60) / daysWithData;
+  const avgDayHours = (totalDayMinutes / 60) / daysWithData;
+  const avgNightHours = (totalNightMinutes / 60) / daysWithData;
+
+  // Donut chart data
+  const getDonutData = () => {
+    if (totalMinutes === 0) {
+      return [
+        {
+          name: 'Sem dados',
+          population: 1,
+          color: colors.border,
+          legendFontColor: colors.textSecondary,
+          legendFontSize: 12,
+        },
+      ];
+    }
+
+    return [
+      {
+        name: 'Diurna',
+        population: totalDayMinutes,
+        color: DAY_COLOR,
+        legendFontColor: colors.textSecondary,
+        legendFontSize: 12,
+      },
+      {
+        name: 'Noturna',
+        population: totalNightMinutes,
+        color: NIGHT_COLOR,
+        legendFontColor: colors.textSecondary,
+        legendFontSize: 12,
+      },
+    ];
+  };
+
   // Chart configurations
   const chartConfig = {
     backgroundColor: colors.cardBackground,
     backgroundGradientFrom: colors.cardBackground,
     backgroundGradientTo: colors.cardBackground,
+    color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+  };
+
+  // Line chart configuration
+  const lineChartConfig = {
+    backgroundColor: colors.cardBackground,
+    backgroundGradientFrom: colors.cardBackground,
+    backgroundGradientTo: colors.cardBackground,
     decimalPlaces: 1,
-    color: (opacity = 1) => `rgba(124, 156, 191, ${opacity})`, // NIGHT_COLOR
+    color: (opacity = 1) => `rgba(124, 156, 191, ${opacity})`,
     labelColor: () => colors.textSecondary,
-    style: {
-      borderRadius: 16,
-    },
     propsForBackgroundLines: {
       strokeDasharray: '',
       stroke: colors.border,
     },
+    propsForDots: {
+      r: '4',
+    },
   };
 
-  // Prepare line chart data
+  // Line chart data with two datasets
   const getLineChartData = () => {
-    const labels = dailyData.map((d) => {
-      const [, month, day] = d.date.split('-').map(Number);
-      return `${day}/${month}`;
-    });
-
-    // Limit labels for readability
-    const maxLabels = 7;
-    const step = Math.ceil(labels.length / maxLabels);
-    const filteredLabels = labels.map((label, i) => (i % step === 0 ? label : ''));
-
-    const data = dailyData.map((d) => d.totalMinutes / 60);
+    if (monthlyData.length === 0) {
+      return {
+        labels: [''],
+        datasets: [{ data: [0] }],
+      };
+    }
 
     return {
-      labels: filteredLabels,
-      datasets: [{ data: data.length > 0 ? data : [0], strokeWidth: 2 }],
+      labels: monthlyData.map(m => m.ageLabel),
+      datasets: [
+        {
+          data: monthlyData.map(m => m.dayAvg),
+          color: (opacity = 1) => `rgba(244, 168, 150, ${opacity})`, // DAY_COLOR
+          strokeWidth: 2,
+        },
+        {
+          data: monthlyData.map(m => m.nightAvg),
+          color: (opacity = 1) => `rgba(124, 156, 191, ${opacity})`, // NIGHT_COLOR
+          strokeWidth: 2,
+        },
+      ],
     };
   };
-
-  // Calculate averages for display
-  const totalHours = dailyData.reduce((sum, d) => sum + d.totalMinutes, 0) / 60;
-  const totalDayHours = dailyData.reduce((sum, d) => sum + d.dayMinutes, 0) / 60;
-  const totalNightHours = dailyData.reduce((sum, d) => sum + d.nightMinutes, 0) / 60;
-  const daysWithData = dailyData.filter(d => d.totalMinutes > 0).length || 1;
-  
-  const avgHoursPerDay = totalHours / daysWithData;
-  const avgDayHours = totalDayHours / daysWithData;
-  const avgNightHours = totalNightHours / daysWithData;
 
   // Empty state
   if (babies.length === 0 && !loading) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
-        <FontAwesome name="bar-chart" size={64} color={colors.textSecondary} />
+        <FontAwesome name="pie-chart" size={64} color={colors.textSecondary} />
         <Text style={[styles.emptyTitle, { color: colors.text }]}>Sem dados</Text>
         <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
           Adicione um bebê para ver estatísticas de sono
@@ -344,48 +324,6 @@ export default function DashboardScreen() {
         </ScrollView>
       )}
 
-      {/* Date Range Filter */}
-      <View style={[styles.dateFilterContainer, { backgroundColor: colors.cardBackground }]}>
-        <View style={styles.dateInputGroup}>
-          <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>De</Text>
-          <TextInput
-            style={[
-              styles.dateInput,
-              { 
-                backgroundColor: colors.background,
-                color: colors.text,
-                borderColor: colors.border,
-              },
-            ]}
-            value={startDateInput}
-            onChangeText={handleStartDateChange}
-            placeholder="DD/MM/AAAA"
-            placeholderTextColor={colors.textSecondary}
-            keyboardType="numeric"
-            maxLength={10}
-          />
-        </View>
-        <View style={styles.dateInputGroup}>
-          <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Até</Text>
-          <TextInput
-            style={[
-              styles.dateInput,
-              { 
-                backgroundColor: colors.background,
-                color: colors.text,
-                borderColor: colors.border,
-              },
-            ]}
-            value={endDateInput}
-            onChangeText={handleEndDateChange}
-            placeholder="DD/MM/AAAA"
-            placeholderTextColor={colors.textSecondary}
-            keyboardType="numeric"
-            maxLength={10}
-          />
-        </View>
-      </View>
-
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.tint} />
@@ -395,7 +333,7 @@ export default function DashboardScreen() {
           {/* Summary Stats */}
           <View style={[styles.statsRow, { backgroundColor: colors.cardBackground }]}>
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: '#FFFFFF' }]}>
+              <Text style={[styles.statValue, { color: colors.text }]}>
                 {avgHoursPerDay.toFixed(1)}h
               </Text>
               <Text style={[styles.statLabel, { color: colors.textSecondary, textAlign: 'center' }]}>
@@ -404,7 +342,7 @@ export default function DashboardScreen() {
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: '#FFFFFF' }]}>
+              <Text style={[styles.statValue, { color: colors.text }]}>
                 {avgDayHours.toFixed(1)}h
               </Text>
               <Text style={[styles.statLabel, { color: colors.textSecondary, textAlign: 'center' }]}>
@@ -413,7 +351,7 @@ export default function DashboardScreen() {
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: '#FFFFFF' }]}>
+              <Text style={[styles.statValue, { color: colors.text }]}>
                 {avgNightHours.toFixed(1)}h
               </Text>
               <Text style={[styles.statLabel, { color: colors.textSecondary, textAlign: 'center' }]}>
@@ -422,32 +360,86 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          {/* Line Chart - Total sleep per day */}
+          {/* Donut Chart - Day vs Night */}
           <View style={[styles.chartCard, { backgroundColor: colors.cardBackground }]}>
             <Text style={[styles.chartTitle, { color: colors.text }]}>
-              <FontAwesome name="line-chart" size={16} color={colors.tint} /> Sono por dia (horas)
+              <FontAwesome name="pie-chart" size={16} color={colors.tint} /> Distribuição do Sono
             </Text>
 
-            {dailyData.length > 0 ? (
-              <LineChart
-                data={getLineChartData()}
-                width={screenWidth - 48}
-                height={220}
-                yAxisSuffix="h"
-                yAxisLabel=""
-                chartConfig={chartConfig}
-                bezier
-                style={styles.chart}
-                fromZero
-              />
-            ) : (
-              <View style={styles.noDataContainer}>
-                <Text style={[styles.noDataText, { color: colors.textSecondary }]}>
-                  Sem registros no período
-                </Text>
+            <PieChart
+              data={getDonutData()}
+              width={screenWidth - 48}
+              height={180}
+              chartConfig={chartConfig}
+              accessor="population"
+              backgroundColor="transparent"
+              paddingLeft="60"
+              center={[0, 0]}
+              hasLegend={false}
+              absolute={false}
+            />
+
+            {/* Percentage labels */}
+            {totalMinutes > 0 && (
+              <View style={styles.percentageRow}>
+                <View style={styles.percentageItem}>
+                  <View style={[styles.colorDot, { backgroundColor: DAY_COLOR }]} />
+                  <Text style={[styles.percentageText, { color: colors.text }]}>
+                    Diurna: {((totalDayMinutes / totalMinutes) * 100).toFixed(0)}%
+                  </Text>
+                </View>
+                <View style={styles.percentageItem}>
+                  <View style={[styles.colorDot, { backgroundColor: NIGHT_COLOR }]} />
+                  <Text style={[styles.percentageText, { color: colors.text }]}>
+                    Noturna: {((totalNightMinutes / totalMinutes) * 100).toFixed(0)}%
+                  </Text>
+                </View>
               </View>
             )}
           </View>
+
+          {/* Line Chart - Monthly Evolution by Age */}
+          {monthlyData.length > 1 && (
+            <View style={[styles.chartCard, { backgroundColor: colors.cardBackground }]}>
+              <Text style={[styles.chartTitle, { color: colors.text }]}>
+                <FontAwesome name="line-chart" size={16} color={colors.tint} /> Evolução por Idade
+              </Text>
+
+              <LineChart
+                data={getLineChartData()}
+                width={screenWidth - 48}
+                height={200}
+                yAxisSuffix="h"
+                yAxisLabel=""
+                chartConfig={lineChartConfig}
+                bezier
+                style={styles.lineChart}
+                fromZero
+                withLegend={false}
+              />
+
+              {/* Legend */}
+              <View style={styles.percentageRow}>
+                <View style={styles.percentageItem}>
+                  <View style={[styles.colorDot, { backgroundColor: DAY_COLOR }]} />
+                  <Text style={[styles.legendLabel, { color: colors.textSecondary }]}>
+                    Média Diurna
+                  </Text>
+                </View>
+                <View style={styles.percentageItem}>
+                  <View style={[styles.colorDot, { backgroundColor: NIGHT_COLOR }]} />
+                  <Text style={[styles.legendLabel, { color: colors.textSecondary }]}>
+                    Média Noturna
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Info text */}
+          <Text style={[styles.infoText, { color: colors.textSecondary }]}>
+            Baseado em {napRecords.length} sonecas registradas em {daysWithData} dias
+          </Text>
         </>
       )}
     </ScrollView>
@@ -494,29 +486,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  dateFilterContainer: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    gap: 12,
-  },
-  dateInputGroup: {
-    flex: 1,
-  },
-  dateLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  dateInput: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    textAlign: 'center',
-  },
   loadingContainer: {
     padding: 48,
     alignItems: 'center',
@@ -533,8 +502,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
   },
   statLabel: {
     fontSize: 12,
@@ -554,16 +523,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
-  chart: {
+  percentageRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    marginTop: 8,
+  },
+  percentageItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  percentageText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  lineChart: {
     borderRadius: 12,
     marginLeft: -16,
   },
-  noDataContainer: {
-    height: 200,
-    alignItems: 'center',
-    justifyContent: 'center',
+  legendLabel: {
+    fontSize: 12,
   },
-  noDataText: {
-    fontSize: 14,
+  infoText: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

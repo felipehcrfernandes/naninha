@@ -43,3 +43,5 @@ yarn-error.*
 # config files
 cursor.md
 .env
+eas.json
+.expo

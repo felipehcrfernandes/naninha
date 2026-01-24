@@ -1,5 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, router } from 'expo-router';
+import { Link } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -82,7 +82,7 @@ export default function LoginScreen() {
                 <FontAwesome name="envelope-o" size={18} color={colors.textSecondary} />
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
-                  placeholder="seu@email.com"
+                  placeholder="email"
                   placeholderTextColor={colors.textSecondary}
                   value={email}
                   onChangeText={setEmail}
@@ -107,7 +107,7 @@ export default function LoginScreen() {
                 <FontAwesome name="lock" size={20} color={colors.textSecondary} />
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
-                  placeholder="Sua senha"
+                  placeholder="senha"
                   placeholderTextColor={colors.textSecondary}
                   value={password}
                   onChangeText={setPassword}
