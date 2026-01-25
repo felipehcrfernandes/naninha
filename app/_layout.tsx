@@ -10,6 +10,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { NapProvider } from '@/contexts/NapContext';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -46,7 +47,9 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <NapProvider>
+        <RootLayoutNav />
+      </NapProvider>
     </AuthProvider>
   );
 }

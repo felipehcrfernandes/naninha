@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -19,6 +19,7 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNap } from '@/contexts/NapContext';
 import { supabase } from '@/lib/supabase';
 
 interface Baby {
@@ -28,26 +29,16 @@ interface Baby {
   gender: 'masculino' | 'feminino';
 }
 
-interface BabyNapState {
-  isNapping: boolean;
-  elapsedSeconds: number;
-  notes: string;
-  startTime: Date | null;
-  intervalId: ReturnType<typeof setInterval> | null;
-}
-
 export default function NapTrackerScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user } = useAuth();
+  const { startNap, stopNap, updateNotes, getElapsedSeconds, isNapping, activeNaps } = useNap();
 
   // Babies state
   const [babies, setBabies] = useState<Baby[]>([]);
   const [loadingBabies, setLoadingBabies] = useState(true);
   const [currentBabyIndex, setCurrentBabyIndex] = useState(0);
-
-  // Nap states for each baby (keyed by baby id)
-  const [napStates, setNapStates] = useState<Record<string, BabyNapState>>({});
 
   const scrollViewRef = useRef<ScrollView>(null);
   const pagerRef = useRef<PagerView>(null);
@@ -85,38 +76,12 @@ export default function NapTrackerScreen() {
         .filter(Boolean) as Baby[];
 
       setBabies(babyList ?? []);
-
-      // Initialize nap states for new babies
-      const newNapStates: Record<string, BabyNapState> = { ...napStates };
-      babyList?.forEach((baby) => {
-        if (!newNapStates[baby.id]) {
-          newNapStates[baby.id] = {
-            isNapping: false,
-            elapsedSeconds: 0,
-            notes: '',
-            startTime: null,
-            intervalId: null,
-          };
-        }
-      });
-      setNapStates(newNapStates);
     } catch (error) {
       console.error('Error fetching babies:', error);
     } finally {
       setLoadingBabies(false);
     }
   };
-
-  // Cleanup intervals on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(napStates).forEach((state) => {
-        if (state.intervalId) {
-          clearInterval(state.intervalId);
-        }
-      });
-    };
-  }, []);
 
   // Save nap to database
   const saveNap = async ({
@@ -152,85 +117,42 @@ export default function NapTrackerScreen() {
     }
   };
 
-  // Get current baby and its nap state
+  // Get current baby
   const currentBaby = babies[currentBabyIndex];
-  const currentNapState = currentBaby ? napStates[currentBaby.id] : null;
 
   // Toggle nap for current baby
   const toggleNap = useCallback(() => {
     if (!currentBaby) return;
 
     const babyId = currentBaby.id;
-    const state = napStates[babyId];
 
-    if (state?.isNapping) {
+    if (isNapping(babyId)) {
       // Stop the nap
-      if (state.intervalId) {
-        clearInterval(state.intervalId);
-      }
-
-      const endTime = new Date();
-      const startTime = state.startTime;
+      const napData = stopNap(babyId);
 
       // Save nap to database
-      if (startTime && state.elapsedSeconds > 0) {
+      if (napData && napData.elapsedSeconds > 0) {
         saveNap({
           babyId,
-          startTime,
-          endTime,
-          durationSeconds: state.elapsedSeconds,
-          notes: state.notes || null,
+          startTime: napData.startTime,
+          endTime: napData.endTime,
+          durationSeconds: napData.elapsedSeconds,
+          notes: napData.notes || null,
         });
       }
-
-      setNapStates((prev) => ({
-        ...prev,
-        [babyId]: {
-          ...prev[babyId],
-          isNapping: false,
-          elapsedSeconds: 0,
-          notes: '',
-          startTime: null,
-          intervalId: null,
-        },
-      }));
     } else {
       // Start a new nap
-      const intervalId = setInterval(() => {
-        setNapStates((prev) => ({
-          ...prev,
-          [babyId]: {
-            ...prev[babyId],
-            elapsedSeconds: (prev[babyId]?.elapsedSeconds ?? 0) + 1,
-          },
-        }));
-      }, 1000);
-
-      setNapStates((prev) => ({
-        ...prev,
-        [babyId]: {
-          ...prev[babyId],
-          isNapping: true,
-          startTime: new Date(),
-          intervalId,
-        },
-      }));
+      startNap(currentBaby);
     }
-  }, [currentBaby, napStates]);
+  }, [currentBaby, isNapping, stopNap, startNap]);
 
   // Update notes for current baby
-  const updateNotes = useCallback(
+  const handleUpdateNotes = useCallback(
     (text: string) => {
       if (!currentBaby) return;
-      setNapStates((prev) => ({
-        ...prev,
-        [currentBaby.id]: {
-          ...prev[currentBaby.id],
-          notes: text,
-        },
-      }));
+      updateNotes(currentBaby.id, text);
     },
-    [currentBaby]
+    [currentBaby, updateNotes]
   );
 
   // Handle page change
@@ -311,21 +233,21 @@ export default function NapTrackerScreen() {
               <View style={[styles.timerContainer, { backgroundColor: colors.background }]}>
                 {/* Timer Display */}
                 <NapTimer
-                  elapsedSeconds={napStates[baby.id]?.elapsedSeconds ?? 0}
-                  isActive={napStates[baby.id]?.isNapping ?? false}
+                  elapsedSeconds={getElapsedSeconds(baby.id)}
+                  isActive={isNapping(baby.id)}
                 />
 
                 {/* Start/Stop Button */}
                 <NapButton
-                  isActive={napStates[baby.id]?.isNapping ?? false}
+                  isActive={isNapping(baby.id)}
                   onPress={index === currentBabyIndex ? toggleNap : () => {}}
                 />
 
                 {/* Notes Input */}
                 <NapNotes
-                  value={napStates[baby.id]?.notes ?? ''}
-                  onChangeText={index === currentBabyIndex ? updateNotes : () => {}}
-                  isActive={napStates[baby.id]?.isNapping ?? false}
+                  value={activeNaps[baby.id]?.notes ?? ''}
+                  onChangeText={index === currentBabyIndex ? handleUpdateNotes : () => {}}
+                  isActive={isNapping(baby.id)}
                   onFocus={handleNotesFocus}
                 />
               </View>

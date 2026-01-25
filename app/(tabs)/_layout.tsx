@@ -49,6 +49,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="today"
+        options={{
+          title: 'Hoje',
+          tabBarIcon: ({ color }) => <TabBarIcon name="calendar-o" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="history"
         options={{
           title: 'Histórico',
