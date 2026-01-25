@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -38,66 +38,6 @@ interface NapRecord {
 // Chart color (orange/coral from palette)
 const NAP_COLOR = '#F4A896';
 
-// ==================== MOCK DATA FOR TESTING ====================
-const USE_MOCK_DATA = true; // Set to false to use real data
-
-const getMockBabies = (): Baby[] => [
-  { id: 'mock-alvaro', name: 'Álvaro', gender: 'masculino' },
-  { id: 'mock-madalena', name: 'Madalena', gender: 'feminino' },
-];
-
-const getMockNaps = (babyId: string): NapRecord[] => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const day = today.getDate();
-
-  if (babyId === 'mock-alvaro') {
-    return [
-      {
-        id: 'nap-1',
-        baby_id: babyId,
-        start_time: new Date(year, month, day, 8, 30).toISOString(),
-        end_time: new Date(year, month, day, 9, 45).toISOString(),
-        duration_seconds: 75 * 60, // 1h15min
-      },
-      {
-        id: 'nap-2',
-        baby_id: babyId,
-        start_time: new Date(year, month, day, 13, 0).toISOString(),
-        end_time: new Date(year, month, day, 15, 30).toISOString(),
-        duration_seconds: 150 * 60, // 2h30min
-      },
-    ];
-  } else if (babyId === 'mock-madalena') {
-    return [
-      {
-        id: 'nap-3',
-        baby_id: babyId,
-        start_time: new Date(year, month, day, 7, 0).toISOString(),
-        end_time: new Date(year, month, day, 8, 0).toISOString(),
-        duration_seconds: 60 * 60, // 1h
-      },
-      {
-        id: 'nap-4',
-        baby_id: babyId,
-        start_time: new Date(year, month, day, 11, 30).toISOString(),
-        end_time: new Date(year, month, day, 12, 15).toISOString(),
-        duration_seconds: 45 * 60, // 45min
-      },
-      {
-        id: 'nap-5',
-        baby_id: babyId,
-        start_time: new Date(year, month, day, 16, 0).toISOString(),
-        end_time: new Date(year, month, day, 17, 30).toISOString(),
-        duration_seconds: 90 * 60, // 1h30min
-      },
-    ];
-  }
-  return [];
-};
-// ================================================================
-
 export default function TodayScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
@@ -109,60 +49,9 @@ export default function TodayScreen() {
   const [loading, setLoading] = useState(true);
   const [chartModalVisible, setChartModalVisible] = useState(false);
 
-  // Fetch babies
-  const fetchBabies = useCallback(async () => {
-    // Use mock data for testing
-    if (USE_MOCK_DATA) {
-      const mockBabies = getMockBabies();
-      setBabies(mockBabies);
-      if (mockBabies.length > 0 && !selectedBabyId) {
-        setSelectedBabyId(mockBabies[0].id);
-      }
-      return;
-    }
-
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('baby_caregivers')
-      .select('baby_id, babies(id, name, gender)')
-      .eq('profile_id', user.id)
-      .eq('is_active', true);
-
-    if (error) {
-      console.error('Error fetching babies:', error);
-      return;
-    }
-
-    const babyList = data
-      ?.map((item: any) => item.babies)
-      .filter(Boolean) as Baby[];
-
-    setBabies(babyList || []);
-    if (babyList && babyList.length > 0 && !selectedBabyId) {
-      setSelectedBabyId(babyList[0].id);
-    }
-  }, [user, selectedBabyId]);
-
-  // Fetch today's nap records for the selected baby
-  const fetchTodayNaps = useCallback(async () => {
-    // Use mock data for testing
-    if (USE_MOCK_DATA) {
-      setLoading(true);
-      // Simulate network delay
-      setTimeout(() => {
-        setNapRecords(selectedBabyId ? getMockNaps(selectedBabyId) : []);
-        setLoading(false);
-      }, 300);
-      return;
-    }
-
-    if (!user || !selectedBabyId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
+  // Fetch today's nap records for a specific baby
+  const fetchTodayNaps = useCallback(async (babyId: string) => {
+    if (!user || !babyId) return [];
 
     // Get today's date range (local timezone)
     const now = new Date();
@@ -172,36 +61,82 @@ export default function TodayScreen() {
     const { data, error } = await supabase
       .from('naps')
       .select('id, baby_id, start_time, end_time, duration_seconds')
-      .eq('baby_id', selectedBabyId)
+      .eq('baby_id', babyId)
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', endOfDay.toISOString())
       .order('start_time', { ascending: true });
 
     if (error) {
       console.error('Error fetching nap records:', error);
+      return [];
+    }
+
+    return data || [];
+  }, [user]);
+
+  // Combined fetch: babies first, then naps
+  const fetchData = useCallback(async () => {
+    if (!user) {
       setLoading(false);
       return;
     }
 
-    setNapRecords(data || []);
+    setLoading(true);
+
+    // Fetch babies
+    const { data: babyData, error: babyError } = await supabase
+      .from('baby_caregivers')
+      .select('baby_id, babies(id, name, gender)')
+      .eq('profile_id', user.id)
+      .eq('is_active', true);
+
+    if (babyError) {
+      console.error('Error fetching babies:', babyError);
+      setLoading(false);
+      return;
+    }
+
+    const babyList = babyData
+      ?.map((item: any) => item.babies)
+      .filter(Boolean) as Baby[];
+
+    setBabies(babyList || []);
+
+    // Select first baby if none selected
+    const targetBabyId = selectedBabyId || babyList?.[0]?.id;
+    if (targetBabyId && !selectedBabyId) {
+      setSelectedBabyId(targetBabyId);
+    }
+
+    // Fetch naps for selected baby
+    if (targetBabyId) {
+      const naps = await fetchTodayNaps(targetBabyId);
+      setNapRecords(naps);
+    }
+
     setLoading(false);
-  }, [user, selectedBabyId]);
+  }, [user, selectedBabyId, fetchTodayNaps]);
+
+  // Fetch naps when baby selection changes
+  const handleBabyChange = useCallback(async (babyId: string) => {
+    setSelectedBabyId(babyId);
+    setLoading(true);
+    const naps = await fetchTodayNaps(babyId);
+    setNapRecords(naps);
+    setLoading(false);
+  }, [fetchTodayNaps]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchBabies();
-    }, [fetchBabies])
+      fetchData();
+    }, [fetchData])
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchTodayNaps();
-    }, [fetchTodayNaps])
-  );
-
-  // Calculate total nap hours for today
-  const totalNapSeconds = napRecords.reduce((acc, nap) => acc + (nap.duration_seconds || 0), 0);
-  const totalNapHours = totalNapSeconds / 3600;
+  // Memoized total nap hours for today
+  const totalNapHours = useMemo(() => {
+    const totalSeconds = napRecords.reduce((acc, nap) => acc + (nap.duration_seconds || 0), 0);
+    return totalSeconds / 3600;
+  }, [napRecords]);
 
   // Format hours for display (xhymin format)
   const formatHours = (hours: number): string => {
@@ -216,11 +151,8 @@ export default function TodayScreen() {
     }
   };
 
-  // Generate chart data for 24-hour timeline
-  // Creates a step-like chart: 1 when sleeping, 0 when awake
-  // Generate chart data with fine granularity for square wave appearance
-  // Using 10-minute intervals (144 points for 24 hours)
-  const generateChartData = () => {
+  // Memoized chart data - only recalculates when napRecords change
+  const chartData = useMemo(() => {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
     
@@ -245,25 +177,17 @@ export default function TodayScreen() {
       dataPoints.push(isSleeping ? 1 : 0);
     }
 
-    return dataPoints;
-  };
-
-  // Create chart data without labels (we'll add custom x-axis)
-  const getChartData = () => {
-    const data = generateChartData();
-    
-    // Don't include labels - we'll draw a custom x-axis for cleaner display
     return {
-      labels: [], // Empty labels - chart will render without x-axis labels
+      labels: [], // Empty labels - we use custom x-axis
       datasets: [
         {
-          data,
+          data: dataPoints,
           color: (opacity = 1) => `rgba(244, 168, 150, ${opacity})`, // NAP_COLOR
           strokeWidth: 3,
         },
       ],
     };
-  };
+  }, [napRecords]);
 
   // Custom x-axis labels
   const xAxisLabels = ['0h', '6h', '12h', '18h', '24h'];
@@ -325,7 +249,7 @@ export default function TodayScreen() {
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => setSelectedBabyId(baby.id)}
+              onPress={() => handleBabyChange(baby.id)}
             >
               <FontAwesome
                 name={baby.gender === 'masculino' ? 'mars' : 'venus'}
@@ -360,7 +284,7 @@ export default function TodayScreen() {
               </Text>
             </View>
             <Text style={[styles.totalCardValue, { color: colors.text }]}>
-              {totalNapSeconds > 0 ? formatHours(totalNapHours) : '0min'}
+              {totalNapHours > 0 ? formatHours(totalNapHours) : '0min'}
             </Text>
             <Text style={[styles.totalCardSubtitle, { color: colors.textSecondary }]}>
               {napRecords.length === 0
@@ -417,7 +341,7 @@ export default function TodayScreen() {
                   </Text>
 
                   <LineChart
-                    data={getChartData()}
+                    data={chartData}
                     width={screenHeight - 80}
                     height={screenWidth - 140}
                     yAxisLabel=""

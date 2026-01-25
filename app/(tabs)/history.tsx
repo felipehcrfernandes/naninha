@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -48,43 +48,8 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilter, setShowFilter] = useState(false);
 
-  // Fetch data when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      fetchBabies();
-      fetchNaps();
-    }, [user?.id, selectedBabyId])
-  );
-
-  const fetchBabies = async () => {
-    if (!user?.id) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('baby_caregivers')
-        .select(`
-          babies (
-            id,
-            name,
-            gender
-          )
-        `)
-        .eq('profile_id', user.id)
-        .eq('is_active', true);
-
-      if (error) throw error;
-
-      const babyList = data
-        ?.map((item: any) => item.babies)
-        .filter(Boolean) as Baby[];
-
-      setBabies(babyList ?? []);
-    } catch (error) {
-      console.error('Error fetching babies:', error);
-    }
-  };
-
-  const fetchNaps = async () => {
+  // Fetch naps with optional baby filter
+  const fetchNaps = useCallback(async (babyIdFilter?: string | null) => {
     if (!user?.id) return;
 
     setLoading(true);
@@ -108,8 +73,8 @@ export default function HistoryScreen() {
         .limit(100);
 
       // Filter by baby if selected
-      if (selectedBabyId) {
-        query = query.eq('baby_id', selectedBabyId);
+      if (babyIdFilter) {
+        query = query.eq('baby_id', babyIdFilter);
       }
 
       const { data, error } = await query;
@@ -122,10 +87,49 @@ export default function HistoryScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
 
-  // Group naps by date
-  const groupNapsByDate = (naps: Nap[]): GroupedNaps[] => {
+  // Combined fetch on focus
+  const fetchData = useCallback(async () => {
+    if (!user?.id) return;
+
+    // Fetch babies (lightweight, no loading state needed)
+    try {
+      const { data, error } = await supabase
+        .from('baby_caregivers')
+        .select('babies(id, name, gender)')
+        .eq('profile_id', user.id)
+        .eq('is_active', true);
+
+      if (!error) {
+        const babyList = data
+          ?.map((item: any) => item.babies)
+          .filter(Boolean) as Baby[];
+        setBabies(babyList ?? []);
+      }
+    } catch (error) {
+      console.error('Error fetching babies:', error);
+    }
+
+    // Fetch naps
+    await fetchNaps(selectedBabyId);
+  }, [user?.id, selectedBabyId, fetchNaps]);
+
+  // Handle baby filter change
+  const handleFilterChange = useCallback((babyId: string | null) => {
+    setSelectedBabyId(babyId);
+    setShowFilter(false);
+    fetchNaps(babyId);
+  }, [fetchNaps]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
+  );
+
+  // Memoized grouped naps by date
+  const groupedNaps = useMemo((): GroupedNaps[] => {
     const groups: Record<string, Nap[]> = {};
 
     naps.forEach((nap) => {
@@ -136,12 +140,12 @@ export default function HistoryScreen() {
       groups[date].push(nap);
     });
 
-    return Object.entries(groups).map(([date, naps]) => ({
+    return Object.entries(groups).map(([date, dateNaps]) => ({
       date,
       label: formatDateLabel(date),
-      naps,
+      naps: dateNaps,
     }));
-  };
+  }, [naps]);
 
   const formatDateLabel = (dateStr: string): string => {
     const [day, month, year] = dateStr.split('/');
@@ -181,7 +185,6 @@ export default function HistoryScreen() {
   };
 
   const selectedBaby = babies.find((b) => b.id === selectedBabyId);
-  const groupedNaps = groupNapsByDate(naps);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -209,10 +212,7 @@ export default function HistoryScreen() {
               styles.filterOption,
               !selectedBabyId && { backgroundColor: colors.tint + '20' },
             ]}
-            onPress={() => {
-              setSelectedBabyId(null);
-              setShowFilter(false);
-            }}
+            onPress={() => handleFilterChange(null)}
           >
             <Text style={[styles.filterOptionText, { color: colors.text }]}>
               Todos os bebês
@@ -229,10 +229,7 @@ export default function HistoryScreen() {
                 styles.filterOption,
                 selectedBabyId === baby.id && { backgroundColor: colors.tint + '20' },
               ]}
-              onPress={() => {
-                setSelectedBabyId(baby.id);
-                setShowFilter(false);
-              }}
+              onPress={() => handleFilterChange(baby.id)}
             >
               <View style={styles.filterBabyRow}>
                 <FontAwesome
