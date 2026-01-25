@@ -7,12 +7,13 @@
     "icon": "./assets/images/icon.png",
     "scheme": "naninha",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.felip.naninha",
@@ -23,28 +24,30 @@
         "ITSAppUsesNonExemptEncryption": false
       }
     },
+
     "android": {
+      "package": "com.felip.naninha",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "package": "com.felip.naninha"
+      }
     },
+
     "web": {
       "bundler": "metro",
       "favicon": "./assets/images/icon.png"
     },
+
     "plugins": [
       "expo-router",
       "@react-native-community/datetimepicker"
     ],
+
     "experiments": {
       "typedRoutes": true
     },
+
     "extra": {
-      "router": {},
       "eas": {
         "projectId": "ec429f6e-133a-4208-a6e4-115dbbe00fd9"
       }
