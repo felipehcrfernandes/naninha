@@ -17,12 +17,14 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBabies } from '@/contexts/BabiesContext';
 import { supabase } from '@/lib/supabase';
 
 export default function AddBabyScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user } = useAuth();
+  const { refreshBabies } = useBabies();
 
   const [name, setName] = useState('');
   const [birthDate, setBirthDate] = useState('');
@@ -121,6 +123,9 @@ export default function AddBabyScreen() {
       if (caregiverError) {
         throw caregiverError;
       }
+
+      // Refresh the babies list in context
+      await refreshBabies();
 
       Alert.alert(
         'Sucesso',

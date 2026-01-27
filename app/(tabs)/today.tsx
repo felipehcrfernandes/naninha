@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -17,16 +17,11 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBabies } from '@/contexts/BabiesContext';
 import { supabase } from '@/lib/supabase';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
-
-interface Baby {
-  id: string;
-  name: string;
-  gender: 'masculino' | 'feminino';
-}
 
 interface NapRecord {
   id: string;
@@ -38,25 +33,49 @@ interface NapRecord {
 // Chart color (orange/coral from palette)
 const NAP_COLOR = '#F4A896';
 
+// Cache time for naps (30 seconds)
+const NAPS_CACHE_TIME = 30000;
+
 export default function TodayScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user } = useAuth();
+  const { babies, loading: loadingBabies } = useBabies();
 
-  const [babies, setBabies] = useState<Baby[]>([]);
   const [selectedBabyId, setSelectedBabyId] = useState<string | null>(null);
   const [napRecords, setNapRecords] = useState<NapRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingNaps, setLoadingNaps] = useState(true);
   const [chartModalVisible, setChartModalVisible] = useState(false);
+  
+  // Cache tracking for naps
+  const lastNapsFetchRef = useRef<{ babyId: string; time: number } | null>(null);
+
+  // Select first baby if none selected when babies load
+  const effectiveBabyId = selectedBabyId || babies[0]?.id || null;
 
   // Fetch today's nap records for a specific baby
-  const fetchTodayNaps = useCallback(async (babyId: string) => {
-    if (!user || !babyId) return [];
+  const fetchTodayNaps = useCallback(async (babyId: string, force: boolean = false) => {
+    if (!user || !babyId) return;
+
+    // Check cache
+    const now = Date.now();
+    if (
+      !force &&
+      lastNapsFetchRef.current?.babyId === babyId &&
+      now - lastNapsFetchRef.current.time < NAPS_CACHE_TIME
+    ) {
+      return;
+    }
+
+    // Only show loading if we don't have data yet
+    if (napRecords.length === 0 || lastNapsFetchRef.current?.babyId !== babyId) {
+      setLoadingNaps(true);
+    }
 
     // Get today's date range (local timezone)
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
 
     const { data, error } = await supabase
       .from('naps')
@@ -68,69 +87,32 @@ export default function TodayScreen() {
 
     if (error) {
       console.error('Error fetching nap records:', error);
-      return [];
+    } else {
+      setNapRecords(data || []);
+      lastNapsFetchRef.current = { babyId, time: Date.now() };
     }
 
-    return data || [];
-  }, [user]);
-
-  // Combined fetch: babies first, then naps
-  const fetchData = useCallback(async () => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-
-    // Fetch babies
-    const { data: babyData, error: babyError } = await supabase
-      .from('baby_caregivers')
-      .select('baby_id, babies(id, name, gender)')
-      .eq('profile_id', user.id)
-      .eq('is_active', true);
-
-    if (babyError) {
-      console.error('Error fetching babies:', babyError);
-      setLoading(false);
-      return;
-    }
-
-    const babyList = babyData
-      ?.map((item: any) => item.babies)
-      .filter(Boolean) as Baby[];
-
-    setBabies(babyList || []);
-
-    // Select first baby if none selected
-    const targetBabyId = selectedBabyId || babyList?.[0]?.id;
-    if (targetBabyId && !selectedBabyId) {
-      setSelectedBabyId(targetBabyId);
-    }
-
-    // Fetch naps for selected baby
-    if (targetBabyId) {
-      const naps = await fetchTodayNaps(targetBabyId);
-      setNapRecords(naps);
-    }
-
-    setLoading(false);
-  }, [user, selectedBabyId, fetchTodayNaps]);
+    setLoadingNaps(false);
+  }, [user, napRecords.length]);
 
   // Fetch naps when baby selection changes
   const handleBabyChange = useCallback(async (babyId: string) => {
     setSelectedBabyId(babyId);
-    setLoading(true);
-    const naps = await fetchTodayNaps(babyId);
-    setNapRecords(naps);
-    setLoading(false);
+    await fetchTodayNaps(babyId, true);
   }, [fetchTodayNaps]);
 
+  // Fetch naps on focus (with cache check)
   useFocusEffect(
     useCallback(() => {
-      fetchData();
-    }, [fetchData])
+      if (effectiveBabyId) {
+        fetchTodayNaps(effectiveBabyId);
+      } else {
+        setLoadingNaps(false);
+      }
+    }, [effectiveBabyId, fetchTodayNaps])
   );
+
+  const loading = loadingBabies || loadingNaps;
 
   // Memoized total nap hours for today
   const totalNapHours = useMemo(() => {

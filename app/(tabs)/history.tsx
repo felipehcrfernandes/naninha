@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -13,13 +13,8 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/contexts/AuthContext';
+import { Baby, useBabies } from '@/contexts/BabiesContext';
 import { supabase } from '@/lib/supabase';
-
-interface Baby {
-  id: string;
-  name: string;
-  gender: 'masculino' | 'feminino';
-}
 
 interface Nap {
   id: string;
@@ -37,22 +32,43 @@ interface GroupedNaps {
   naps: Nap[];
 }
 
+// Cache time for naps (30 seconds)
+const NAPS_CACHE_TIME = 30000;
+
 export default function HistoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user } = useAuth();
+  const { babies, loading: loadingBabies } = useBabies();
 
   const [naps, setNaps] = useState<Nap[]>([]);
-  const [babies, setBabies] = useState<Baby[]>([]);
   const [selectedBabyId, setSelectedBabyId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingNaps, setLoadingNaps] = useState(true);
   const [showFilter, setShowFilter] = useState(false);
+  
+  // Cache tracking
+  const lastFetchRef = useRef<{ babyId: string | null; time: number } | null>(null);
 
   // Fetch naps with optional baby filter
-  const fetchNaps = useCallback(async (babyIdFilter?: string | null) => {
+  const fetchNaps = useCallback(async (babyIdFilter: string | null, force: boolean = false) => {
     if (!user?.id) return;
 
-    setLoading(true);
+    // Check cache
+    const now = Date.now();
+    if (
+      !force &&
+      lastFetchRef.current &&
+      lastFetchRef.current.babyId === babyIdFilter &&
+      now - lastFetchRef.current.time < NAPS_CACHE_TIME
+    ) {
+      return;
+    }
+
+    // Only show loading if we don't have data or filter changed
+    if (naps.length === 0 || lastFetchRef.current?.babyId !== babyIdFilter) {
+      setLoadingNaps(true);
+    }
+
     try {
       let query = supabase
         .from('naps')
@@ -82,51 +98,50 @@ export default function HistoryScreen() {
       if (error) throw error;
 
       setNaps((data as unknown as Nap[]) ?? []);
+      lastFetchRef.current = { babyId: babyIdFilter, time: Date.now() };
     } catch (error) {
       console.error('Error fetching naps:', error);
     } finally {
-      setLoading(false);
+      setLoadingNaps(false);
     }
-  }, [user?.id]);
-
-  // Combined fetch on focus
-  const fetchData = useCallback(async () => {
-    if (!user?.id) return;
-
-    // Fetch babies (lightweight, no loading state needed)
-    try {
-      const { data, error } = await supabase
-        .from('baby_caregivers')
-        .select('babies(id, name, gender)')
-        .eq('profile_id', user.id)
-        .eq('is_active', true);
-
-      if (!error) {
-        const babyList = data
-          ?.map((item: any) => item.babies)
-          .filter(Boolean) as Baby[];
-        setBabies(babyList ?? []);
-      }
-    } catch (error) {
-      console.error('Error fetching babies:', error);
-    }
-
-    // Fetch naps
-    await fetchNaps(selectedBabyId);
-  }, [user?.id, selectedBabyId, fetchNaps]);
+  }, [user?.id, naps.length]);
 
   // Handle baby filter change
   const handleFilterChange = useCallback((babyId: string | null) => {
     setSelectedBabyId(babyId);
     setShowFilter(false);
-    fetchNaps(babyId);
+    fetchNaps(babyId, true);
   }, [fetchNaps]);
 
+  // Fetch naps on focus (with cache check)
   useFocusEffect(
     useCallback(() => {
-      fetchData();
-    }, [fetchData])
+      fetchNaps(selectedBabyId);
+    }, [selectedBabyId, fetchNaps])
   );
+
+  const loading = loadingBabies || loadingNaps;
+
+  // Format date label helper (defined before useMemo that uses it)
+  const formatDateLabel = useCallback((dateStr: string): string => {
+    const [day, month, year] = dateStr.split('/');
+    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return 'Hoje';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Ontem';
+    } else {
+      return date.toLocaleDateString('pt-BR', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+      });
+    }
+  }, []);
 
   // Memoized grouped naps by date
   const groupedNaps = useMemo((): GroupedNaps[] => {
@@ -145,27 +160,7 @@ export default function HistoryScreen() {
       label: formatDateLabel(date),
       naps: dateNaps,
     }));
-  }, [naps]);
-
-  const formatDateLabel = (dateStr: string): string => {
-    const [day, month, year] = dateStr.split('/');
-    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) {
-      return 'Hoje';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Ontem';
-    } else {
-      return date.toLocaleDateString('pt-BR', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-      });
-    }
-  };
+  }, [naps, formatDateLabel]);
 
   const formatTime = (isoString: string): string => {
     return new Date(isoString).toLocaleTimeString('pt-BR', {

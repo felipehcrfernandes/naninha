@@ -1,22 +1,18 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, View, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
-import { PieChart, LineChart } from 'react-native-chart-kit';
 import { useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Dimensions, Modal, Pressable, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { LineChart, PieChart } from 'react-native-chart-kit';
 
 import { Text } from '@/components/Themed';
-import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBabies } from '@/contexts/BabiesContext';
 import { supabase } from '@/lib/supabase';
 
 const screenWidth = Dimensions.get('window').width;
-
-interface Baby {
-  id: string;
-  name: string;
-  birth_date: string | null;
-}
+const screenHeight = Dimensions.get('window').height;
 
 interface NapRecord {
   id: string;
@@ -30,15 +26,19 @@ interface NapRecord {
 const DAY_COLOR = '#F4A896'; // Coral - same as "Parar Soneca" button
 const NIGHT_COLOR = '#7C9CBF'; // Blue - sleeping color
 
+// Cache time for nap records (30 seconds)
+const NAPS_CACHE_TIME = 30000;
+
 export default function DashboardScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user } = useAuth();
+  const { babies, loading: loadingBabies } = useBabies();
 
-  const [babies, setBabies] = useState<Baby[]>([]);
   const [selectedBabyId, setSelectedBabyId] = useState<string | null>(null);
   const [napRecords, setNapRecords] = useState<NapRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingNaps, setLoadingNaps] = useState(true);
+  const [chartModalVisible, setChartModalVisible] = useState(false);
   
   // Aggregated stats
   const [totalDayMinutes, setTotalDayMinutes] = useState(0);
@@ -47,60 +47,55 @@ export default function DashboardScreen() {
   
   // Monthly data for line chart (by baby age)
   const [monthlyData, setMonthlyData] = useState<{ ageLabel: string; dayAvg: number; nightAvg: number }[]>([]);
+  
+  // Cache tracking
+  const lastFetchRef = useRef<{ babyId: string; time: number } | null>(null);
 
-  // Fetch babies
-  const fetchBabies = useCallback(async () => {
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('baby_caregivers')
-      .select('baby_id, babies(id, name, birth_date)')
-      .eq('profile_id', user.id)
-      .eq('is_active', true);
-
-    if (error) {
-      console.error('Error fetching babies:', error);
-      return;
-    }
-
-    const babyList = data
-      ?.map((item: any) => item.babies)
-      .filter(Boolean) as Baby[];
-
-    setBabies(babyList || []);
-    if (babyList && babyList.length > 0 && !selectedBabyId) {
-      setSelectedBabyId(babyList[0].id);
-    }
-  }, [user, selectedBabyId]);
+  // Select first baby if none selected
+  const effectiveBabyId = selectedBabyId || babies[0]?.id || null;
 
   // Fetch ALL nap records for the baby
-  const fetchNapRecords = useCallback(async () => {
-    if (!user || !selectedBabyId) {
-      setLoading(false);
+  const fetchNapRecords = useCallback(async (babyId: string, force: boolean = false) => {
+    if (!user || !babyId) {
+      setLoadingNaps(false);
       return;
     }
 
-    setLoading(true);
+    // Check cache
+    const now = Date.now();
+    if (
+      !force &&
+      lastFetchRef.current?.babyId === babyId &&
+      now - lastFetchRef.current.time < NAPS_CACHE_TIME
+    ) {
+      return;
+    }
+
+    // Only show loading if we don't have data or baby changed
+    if (napRecords.length === 0 || lastFetchRef.current?.babyId !== babyId) {
+      setLoadingNaps(true);
+    }
 
     const { data, error } = await supabase
       .from('naps')
       .select('*')
-      .eq('baby_id', selectedBabyId)
+      .eq('baby_id', babyId)
       .order('start_time', { ascending: true });
 
     if (error) {
       console.error('Error fetching nap records:', error);
-      setLoading(false);
+      setLoadingNaps(false);
       return;
     }
 
     setNapRecords(data || []);
+    lastFetchRef.current = { babyId, time: Date.now() };
     
     // Get selected baby's birth date
-    const selectedBaby = babies.find(b => b.id === selectedBabyId);
+    const selectedBaby = babies.find(b => b.id === babyId);
     processData(data || [], selectedBaby?.birth_date || null);
-    setLoading(false);
-  }, [user, selectedBabyId, babies]);
+    setLoadingNaps(false);
+  }, [user, babies, napRecords.length]);
 
   // Helper to get local date key (YYYY-MM-DD) without timezone shift
   const getLocalDateKey = (date: Date): string => {
@@ -174,15 +169,24 @@ export default function DashboardScreen() {
     setMonthlyData(monthlyArray);
   };
 
+  // Handle baby selection change
+  const handleBabySelect = useCallback((babyId: string) => {
+    setSelectedBabyId(babyId);
+    fetchNapRecords(babyId, true);
+  }, [fetchNapRecords]);
+
+  // Fetch naps on focus (with cache check)
   useFocusEffect(
     useCallback(() => {
-      fetchBabies();
-    }, [fetchBabies])
+      if (effectiveBabyId) {
+        fetchNapRecords(effectiveBabyId);
+      } else {
+        setLoadingNaps(false);
+      }
+    }, [effectiveBabyId, fetchNapRecords])
   );
 
-  useEffect(() => {
-    fetchNapRecords();
-  }, [fetchNapRecords]);
+  const loading = loadingBabies || loadingNaps;
 
   // Calculate averages
   const totalMinutes = totalDayMinutes + totalNightMinutes;
@@ -305,16 +309,16 @@ export default function DashboardScreen() {
               style={[
                 styles.babyChip,
                 { 
-                  backgroundColor: selectedBabyId === baby.id ? colors.tint : colors.cardBackground,
+                  backgroundColor: effectiveBabyId === baby.id ? colors.tint : colors.cardBackground,
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => setSelectedBabyId(baby.id)}
+              onPress={() => handleBabySelect(baby.id)}
             >
               <Text
                 style={[
                   styles.babyChipText,
-                  { color: selectedBabyId === baby.id ? '#FFF' : colors.text },
+                  { color: effectiveBabyId === baby.id ? '#FFF' : colors.text },
                 ]}
               >
                 {baby.name}
@@ -398,43 +402,103 @@ export default function DashboardScreen() {
             )}
           </View>
 
-          {/* Line Chart - Monthly Evolution by Age */}
-          {monthlyData.length > 1 && (
-            <View style={[styles.chartCard, { backgroundColor: colors.cardBackground }]}>
-              <Text style={[styles.chartTitle, { color: colors.text }]}>
-                <FontAwesome name="line-chart" size={16} color={colors.tint} /> Evolução por Idade
-              </Text>
-
-              <LineChart
-                data={getLineChartData()}
-                width={screenWidth - 48}
-                height={200}
-                yAxisSuffix="h"
-                yAxisLabel=""
-                chartConfig={lineChartConfig}
-                bezier
-                style={styles.lineChart}
-                fromZero
-                withLegend={false}
-              />
-
-              {/* Legend */}
-              <View style={styles.percentageRow}>
-                <View style={styles.percentageItem}>
-                  <View style={[styles.colorDot, { backgroundColor: DAY_COLOR }]} />
-                  <Text style={[styles.legendLabel, { color: colors.textSecondary }]}>
-                    Média Diurna
-                  </Text>
+          {/* Line Chart Button - Monthly Evolution by Age */}
+          {monthlyData.length > 0 && (
+            <TouchableOpacity
+              style={[styles.chartButton, { backgroundColor: colors.cardBackground }]}
+              onPress={() => setChartModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.chartButtonContent}>
+                <View style={styles.chartButtonLeft}>
+                  <FontAwesome name="line-chart" size={24} color={colors.tint} />
+                  <View>
+                    <Text style={[styles.chartButtonTitle, { color: colors.text }]}>
+                      Evolução por Idade
+                    </Text>
+                    <Text style={[styles.chartButtonSubtitle, { color: colors.textSecondary }]}>
+                      Toque para visualizar
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.percentageItem}>
-                  <View style={[styles.colorDot, { backgroundColor: NIGHT_COLOR }]} />
-                  <Text style={[styles.legendLabel, { color: colors.textSecondary }]}>
-                    Média Noturna
-                  </Text>
-                </View>
+                <FontAwesome name="expand" size={20} color={colors.textSecondary} />
               </View>
-            </View>
+            </TouchableOpacity>
           )}
+
+          {/* Line Chart Modal */}
+          <Modal
+            visible={chartModalVisible}
+            animationType="fade"
+            transparent={false}
+            onRequestClose={() => setChartModalVisible(false)}
+          >
+            <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+              {/* Close button */}
+              <Pressable
+                style={[styles.closeButton, { backgroundColor: colors.cardBackground }]}
+                onPress={() => setChartModalVisible(false)}
+              >
+                <FontAwesome name="times" size={20} color={colors.text} />
+              </Pressable>
+
+              {/* Content */}
+              {monthlyData.length > 1 ? (
+                /* Rotated chart container */
+                <View style={styles.rotatedChartWrapper}>
+                  <View style={[styles.rotatedChartContainer, { transform: [{ rotate: '90deg' }] }]}>
+                    <Text style={[styles.modalChartTitle, { color: colors.text }]}>
+                      Evolução por Idade do Bebê
+                    </Text>
+
+                    <LineChart
+                      data={getLineChartData()}
+                      width={screenHeight - 80}
+                      height={screenWidth - 140}
+                      yAxisSuffix="h"
+                      yAxisLabel=""
+                      chartConfig={{
+                        ...lineChartConfig,
+                        backgroundColor: colors.background,
+                        backgroundGradientFrom: colors.background,
+                        backgroundGradientTo: colors.background,
+                      }}
+                      bezier
+                      style={styles.modalChart}
+                      fromZero
+                    />
+
+                    {/* Legend */}
+                    <View style={styles.modalLegendContainer}>
+                      <View style={styles.modalLegendItem}>
+                        <View style={[styles.colorDot, { backgroundColor: DAY_COLOR }]} />
+                        <Text style={[styles.modalLegendText, { color: colors.textSecondary }]}>
+                          Média Diurna (6h-18h)
+                        </Text>
+                      </View>
+                      <View style={styles.modalLegendItem}>
+                        <View style={[styles.colorDot, { backgroundColor: NIGHT_COLOR }]} />
+                        <Text style={[styles.modalLegendText, { color: colors.textSecondary }]}>
+                          Média Noturna (18h-6h)
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              ) : (
+                /* Not enough data message */
+                <View style={styles.notEnoughDataContainer}>
+                  <FontAwesome name="line-chart" size={64} color={colors.textSecondary} />
+                  <Text style={[styles.notEnoughDataTitle, { color: colors.text }]}>
+                    Dados insuficientes
+                  </Text>
+                  <Text style={[styles.notEnoughDataText, { color: colors.textSecondary }]}>
+                    Registre sonecas por mais de um mês para ver a evolução do sono do seu bebê ao longo do tempo.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </Modal>
 
           {/* Info text */}
           <Text style={[styles.infoText, { color: colors.textSecondary }]}>
@@ -523,6 +587,99 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
+  chartButton: {
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  chartButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  chartButtonLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  chartButtonTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  chartButtonSubtitle: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  rotatedChartWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rotatedChartContainer: {
+    alignItems: 'center',
+  },
+  modalChartTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalChart: {
+    borderRadius: 12,
+    marginLeft: -40,
+  },
+  modalLegendContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    marginTop: 16,
+  },
+  modalLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalLegendText: {
+    fontSize: 13,
+  },
+  modalInfoText: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  notEnoughDataContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  notEnoughDataTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  notEnoughDataText: {
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
   percentageRow: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -542,10 +699,6 @@ const styles = StyleSheet.create({
   percentageText: {
     fontSize: 14,
     fontWeight: '500',
-  },
-  lineChart: {
-    borderRadius: 12,
-    marginLeft: -16,
   },
   legendLabel: {
     fontSize: 12,

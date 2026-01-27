@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import { router } from 'expo-router';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,66 +15,18 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
-
-interface Baby {
-  id: string;
-  name: string;
-  birth_date: string | null;
-  gender: 'masculino' | 'feminino';
-}
+import { useBabies } from '@/contexts/BabiesContext';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user, profile, signOut, updateProfile, deleteAccount } = useAuth();
+  const { babies, loading: loadingBabies } = useBabies();
 
   const [name, setName] = useState(profile?.name ?? '');
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [babies, setBabies] = useState<Baby[]>([]);
-  const [loadingBabies, setLoadingBabies] = useState(true);
-
-  // Fetch babies when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      fetchBabies();
-    }, [user?.id])
-  );
-
-  const fetchBabies = async () => {
-    if (!user?.id) return;
-
-    setLoadingBabies(true);
-    try {
-      const { data, error } = await supabase
-        .from('baby_caregivers')
-        .select(`
-          baby_id,
-          babies (
-            id,
-            name,
-            birth_date,
-            gender
-          )
-        `)
-        .eq('profile_id', user.id)
-        .eq('is_active', true);
-
-      if (error) throw error;
-
-      const babyList = data
-        ?.map((item: any) => item.babies)
-        .filter(Boolean) as Baby[];
-      
-      setBabies(babyList ?? []);
-    } catch (error) {
-      console.error('Error fetching babies:', error);
-    } finally {
-      setLoadingBabies(false);
-    }
-  };
 
   const handleSaveName = async () => {
     if (!name.trim()) {
@@ -123,7 +75,7 @@ export default function ProfileScreen() {
           onPress: async () => {
             const { error } = await deleteAccount();
             if (error) {
-              Alert.alert('Erro', 'Não foi possível deletar a conta');
+              Alert.alert('Erro', `Não foi possível deletar a conta: ${error.message}`);
             }
           },
         },

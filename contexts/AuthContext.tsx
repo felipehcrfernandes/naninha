@@ -125,26 +125,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: error as Error | null };
   };
 
-  // Delete account
+  // Delete account - calls Edge Function for full deletion
   const deleteAccount = async () => {
     if (!user) return { error: new Error('No user logged in') };
 
-    // Delete profile first (cascade should handle this, but being explicit)
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', user.id);
+    try {
+      // Get current session for authorization
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (!currentSession?.access_token) {
+        return { error: new Error('No active session') };
+      }
 
-    if (profileError) {
-      return { error: profileError as Error };
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        return { error: new Error('Supabase URL not configured') };
+      }
+
+      // Call Edge Function to delete user (requires admin API)
+      // Try "delete-user" first, then "delete" as fallback
+      const functionUrl = `${supabaseUrl}/functions/v1/delete-user`;
+      
+      console.log('Calling delete function:', functionUrl);
+
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${currentSession.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Response status:', response.status);
+
+      const result = await response.json();
+      console.log('Response body:', result);
+
+      if (!response.ok) {
+        return { error: new Error(result.error || `HTTP ${response.status}`) };
+      }
+
+      // Clear local state
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+
+      return { error: null };
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      return { error: error as Error };
     }
-
-    // Sign out (account deletion requires server-side admin API)
-    // For now, we sign out - full deletion requires Edge Function
-    await supabase.auth.signOut();
-    setProfile(null);
-
-    return { error: null };
   };
 
   return (

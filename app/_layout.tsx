@@ -3,14 +3,22 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { NapProvider } from '@/contexts/NapContext';
+import { BabiesProvider } from '@/contexts/BabiesContext';
+import { NapProvider, useNap } from '@/contexts/NapContext';
+import {
+  addNotificationResponseListener,
+  initializeNotifications,
+  isStopNapAction,
+  STOP_NAP_ACTION,
+} from '@/lib/notifications';
+import { supabase } from '@/lib/supabase';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -47,11 +55,78 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <NapProvider>
-        <RootLayoutNav />
-      </NapProvider>
+      <BabiesProvider>
+        <NapProvider>
+          <NotificationHandler />
+          <RootLayoutNav />
+        </NapProvider>
+      </BabiesProvider>
     </AuthProvider>
   );
+}
+
+// Component to handle notification initialization and actions
+function NotificationHandler() {
+  const { stopFirstActiveNap } = useNap();
+  const { user } = useAuth();
+  const stopFirstActiveNapRef = useRef(stopFirstActiveNap);
+
+  // Keep ref updated
+  useEffect(() => {
+    stopFirstActiveNapRef.current = stopFirstActiveNap;
+  }, [stopFirstActiveNap]);
+
+  // Initialize notifications on mount
+  useEffect(() => {
+    initializeNotifications();
+  }, []);
+
+  // Save nap to database helper
+  const saveNapToDatabase = async (napData: {
+    babyId: string;
+    startTime: Date;
+    endTime: Date;
+    elapsedSeconds: number;
+    notes: string;
+  }) => {
+    if (!user?.id || napData.elapsedSeconds <= 0) return;
+
+    try {
+      const { error } = await supabase.from('naps').insert({
+        baby_id: napData.babyId,
+        started_by: user.id,
+        start_time: napData.startTime.toISOString(),
+        end_time: napData.endTime.toISOString(),
+        duration_seconds: napData.elapsedSeconds,
+        notes: napData.notes || null,
+      });
+
+      if (error) {
+        console.error('Error saving nap from notification:', error);
+      } else {
+        console.log('Nap saved from notification action');
+      }
+    } catch (error) {
+      console.error('Error saving nap from notification:', error);
+    }
+  };
+
+  // Listen for notification actions
+  useEffect(() => {
+    const subscription = addNotificationResponseListener((response) => {
+      // Check if user tapped the "Stop Nap" action or the notification itself
+      if (isStopNapAction(response) || response.actionIdentifier === 'expo.modules.notifications.actions.DEFAULT') {
+        const napData = stopFirstActiveNapRef.current();
+        if (napData) {
+          saveNapToDatabase(napData);
+        }
+      }
+    });
+
+    return () => subscription.remove();
+  }, [user?.id]);
+
+  return null;
 }
 
 function RootLayoutNav() {

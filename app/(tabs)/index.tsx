@@ -1,5 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -19,72 +19,24 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBabies } from '@/contexts/BabiesContext';
 import { useNap } from '@/contexts/NapContext';
 import { supabase } from '@/lib/supabase';
-
-interface Baby {
-  id: string;
-  name: string;
-  birth_date: string | null;
-  gender: 'masculino' | 'feminino';
-}
 
 export default function NapTrackerScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const { user } = useAuth();
+  const { babies, loading: loadingBabies } = useBabies();
   const { startNap, stopNap, updateNotes, getElapsedSeconds, isNapping, activeNaps } = useNap();
 
-  // Babies state
-  const [babies, setBabies] = useState<Baby[]>([]);
-  const [loadingBabies, setLoadingBabies] = useState(true);
   const [currentBabyIndex, setCurrentBabyIndex] = useState(0);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const pagerRef = useRef<PagerView>(null);
 
-  // Fetch babies when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      fetchBabies();
-    }, [user?.id])
-  );
-
-  const fetchBabies = async () => {
-    if (!user?.id) return;
-
-    setLoadingBabies(true);
-    try {
-      const { data, error } = await supabase
-        .from('baby_caregivers')
-        .select(`
-          baby_id,
-          babies (
-            id,
-            name,
-            birth_date,
-            gender
-          )
-        `)
-        .eq('profile_id', user.id)
-        .eq('is_active', true);
-
-      if (error) throw error;
-
-      const babyList = data
-        ?.map((item: any) => item.babies)
-        .filter(Boolean) as Baby[];
-
-      setBabies(babyList ?? []);
-    } catch (error) {
-      console.error('Error fetching babies:', error);
-    } finally {
-      setLoadingBabies(false);
-    }
-  };
-
-  // Save nap to database
-  const saveNap = async ({
+  // Save nap to database - wrapped in useCallback with user dependency
+  const saveNap = useCallback(async ({
     babyId,
     startTime,
     endTime,
@@ -97,10 +49,15 @@ export default function NapTrackerScreen() {
     durationSeconds: number;
     notes: string | null;
   }) => {
+    if (!user?.id) {
+      console.error('Error saving nap: No user ID');
+      return;
+    }
+
     try {
       const { error } = await supabase.from('naps').insert({
         baby_id: babyId,
-        started_by: user?.id,
+        started_by: user.id,
         start_time: startTime.toISOString(),
         end_time: endTime.toISOString(),
         duration_seconds: durationSeconds,
@@ -115,7 +72,7 @@ export default function NapTrackerScreen() {
     } catch (error) {
       console.error('Error saving nap:', error);
     }
-  };
+  }, [user?.id]);
 
   // Get current baby
   const currentBaby = babies[currentBabyIndex];
@@ -144,7 +101,7 @@ export default function NapTrackerScreen() {
       // Start a new nap
       startNap(currentBaby);
     }
-  }, [currentBaby, isNapping, stopNap, startNap]);
+  }, [currentBaby, isNapping, stopNap, startNap, saveNap]);
 
   // Update notes for current baby
   const handleUpdateNotes = useCallback(
