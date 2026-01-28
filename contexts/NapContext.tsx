@@ -1,12 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import { dismissNapNotification, showNapNotification } from '@/lib/notifications';
-
 const STORAGE_KEY = '@naninha/active_naps';
-
-// How often to update the notification (in seconds)
-const NOTIFICATION_UPDATE_INTERVAL = 30;
 
 interface Baby {
   id: string;
@@ -41,7 +36,6 @@ export function NapProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [tick, setTick] = useState(0); // Used to force re-render for timer updates
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastNotificationUpdateRef = useRef<number>(0);
 
   // Load persisted naps on mount
   useEffect(() => {
@@ -82,30 +76,6 @@ export function NapProvider({ children }: { children: React.ReactNode }) {
     persistNaps();
   }, [activeNaps, isLoading]);
 
-  // Update notification when active naps change
-  useEffect(() => {
-    const updateNotification = async () => {
-      const napIds = Object.keys(activeNaps);
-      
-      if (napIds.length > 0) {
-        // Get the first active nap to show in notification
-        const firstNap = activeNaps[napIds[0]];
-        const startTime = new Date(firstNap.startTime);
-        const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
-        
-        await showNapNotification(firstNap.babyName, firstNap.babyGender, elapsed);
-        lastNotificationUpdateRef.current = Date.now();
-      } else {
-        // No active naps, dismiss notification
-        await dismissNapNotification();
-      }
-    };
-
-    if (!isLoading) {
-      updateNotification();
-    }
-  }, [activeNaps, isLoading]);
-
   // Start/stop tick interval based on whether there are active naps
   useEffect(() => {
     const napIds = Object.keys(activeNaps);
@@ -115,18 +85,6 @@ export function NapProvider({ children }: { children: React.ReactNode }) {
       if (!tickIntervalRef.current) {
         tickIntervalRef.current = setInterval(() => {
           setTick((t) => t + 1);
-          
-          // Update notification every NOTIFICATION_UPDATE_INTERVAL seconds
-          const now = Date.now();
-          if (now - lastNotificationUpdateRef.current >= NOTIFICATION_UPDATE_INTERVAL * 1000) {
-            const firstNap = activeNaps[napIds[0]];
-            if (firstNap) {
-              const startTime = new Date(firstNap.startTime);
-              const elapsed = Math.floor((now - startTime.getTime()) / 1000);
-              showNapNotification(firstNap.babyName, firstNap.babyGender, elapsed);
-              lastNotificationUpdateRef.current = now;
-            }
-          }
         }, 1000);
       }
     } else {

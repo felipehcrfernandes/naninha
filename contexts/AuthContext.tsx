@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import { createTrialSubscription } from './SubscriptionContext';
 
 interface Profile {
   id: string;
@@ -80,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sign up with email, password, and name
   const signUp = async (email: string, password: string, name: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -89,6 +90,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       },
     });
+
+    // If signup successful, create trial subscription
+    if (!error && data.user) {
+      const { error: subscriptionError } = await createTrialSubscription(data.user.id);
+      if (subscriptionError) {
+        console.error('Error creating trial subscription:', subscriptionError);
+        // Don't fail the signup, just log the error
+      }
+    }
 
     return { error: error as Error | null };
   };

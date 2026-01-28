@@ -21,7 +21,11 @@
       "deploymentTarget": "15.1",
       "infoPlist": {
         "NSUserTrackingUsageDescription": "This app does not track users across other apps or websites.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "SKAdNetworkItems": []
+      },
+      "entitlements": {
+        "com.apple.developer.in-app-payments": []
       }
     },
 
@@ -42,9 +46,9 @@
       "expo-router",
       "@react-native-community/datetimepicker",
       [
-        "expo-notifications",
+        "react-native-iap",
         {
-          "sounds": []
+          "paymentProvider": "Apple"
         }
       ]
     ],
