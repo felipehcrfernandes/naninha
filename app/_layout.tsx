@@ -7,13 +7,11 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
-import { Paywall } from '@/components/Paywall';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { BabiesProvider } from '@/contexts/BabiesContext';
 import { NapProvider } from '@/contexts/NapContext';
-import { SubscriptionProvider, useSubscription } from '@/contexts/SubscriptionContext';
 
 export {
     // Catch any errors thrown by the Layout component.
@@ -50,13 +48,11 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <SubscriptionProvider>
-        <BabiesProvider>
-          <NapProvider>
-            <RootLayoutNav />
-          </NapProvider>
-        </BabiesProvider>
-      </SubscriptionProvider>
+      <BabiesProvider>
+        <NapProvider>
+          <RootLayoutNav />
+        </NapProvider>
+      </BabiesProvider>
     </AuthProvider>
   );
 }
@@ -64,8 +60,7 @@ export default function RootLayout() {
 function RootLayoutNav() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { session, loading, signOut } = useAuth();
-  const { isActive, isLoading: subscriptionLoading, status } = useSubscription();
+  const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -83,22 +78,12 @@ function RootLayoutNav() {
     }
   }, [session, loading, segments]);
 
-  // Show loading screen while checking auth or subscription
-  if (loading || (session && subscriptionLoading)) {
+  // Show loading screen while checking auth
+  if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color={colors.tint} />
       </View>
-    );
-  }
-
-  // Show paywall if user is authenticated but subscription is not active
-  // (expired, cancelled, or no subscription)
-  if (session && !isActive && status !== 'loading') {
-    return (
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Paywall onLogout={signOut} />
-      </ThemeProvider>
     );
   }
 

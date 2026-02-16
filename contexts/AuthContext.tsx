@@ -1,8 +1,9 @@
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { Session, User } from '@supabase/supabase-js';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
-import { createTrialSubscription } from './SubscriptionContext';
 
 interface Profile {
   id: string;
@@ -19,6 +20,7 @@ interface AuthContextType {
   loading: boolean;
   signUp: (email: string, password: string, name: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithApple: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   updateProfile: (name: string) => Promise<{ error: Error | null }>;
   deleteAccount: () => Promise<{ error: Error | null }>;
@@ -81,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sign up with email, password, and name
   const signUp = async (email: string, password: string, name: string) => {
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -90,15 +92,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       },
     });
-
-    // If signup successful, create trial subscription
-    if (!error && data.user) {
-      const { error: subscriptionError } = await createTrialSubscription(data.user.id);
-      if (subscriptionError) {
-        console.error('Error creating trial subscription:', subscriptionError);
-        // Don't fail the signup, just log the error
-      }
-    }
 
     return { error: error as Error | null };
   };
@@ -111,6 +104,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return { error: error as Error | null };
+  };
+
+  // Sign in with Apple
+  const signInWithApple = async () => {
+    try {
+      const nonce = Math.random().toString(36).substring(2, 10);
+      const hashedNonce = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        nonce
+      );
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashedNonce,
+      });
+
+      const identityToken = credential.identityToken;
+      if (!identityToken) {
+        return { error: new Error('No identity token returned from Apple') };
+      }
+
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: identityToken,
+        nonce,
+      });
+
+      if (error) {
+        return { error: error as Error };
+      }
+
+      // Update profile name if Apple provided it (only on first sign-in)
+      if (credential.fullName?.givenName) {
+        const fullName = [credential.fullName.givenName, credential.fullName.familyName]
+          .filter(Boolean)
+          .join(' ');
+
+        // Wait briefly for the auth state to update
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (currentSession?.user) {
+          await supabase
+            .from('profiles')
+            .update({ name: fullName })
+            .eq('id', currentSession.user.id);
+        }
+      }
+
+      return { error: null };
+    } catch (error: any) {
+      if (error.code === 'ERR_REQUEST_CANCELED') {
+        return { error: null }; // User cancelled, not an error
+      }
+      return { error: error as Error };
+    }
   };
 
   // Sign out
@@ -196,6 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         signUp,
         signIn,
+        signInWithApple,
         signOut,
         updateProfile,
         deleteAccount,

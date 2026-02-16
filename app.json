@@ -15,26 +15,15 @@
     },
 
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.felip.naninha",
       "buildNumber": "1",
       "deploymentTarget": "15.1",
       "infoPlist": {
         "NSUserTrackingUsageDescription": "This app does not track users across other apps or websites.",
-        "ITSAppUsesNonExemptEncryption": false,
-        "SKAdNetworkItems": []
+        "ITSAppUsesNonExemptEncryption": false
       },
-      "entitlements": {
-        "com.apple.developer.in-app-payments": []
-      }
-    },
-
-    "android": {
-      "package": "com.felip.naninha",
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "#ffffff"
-      }
+      "usesAppleSignIn": true
     },
 
     "web": {
@@ -44,13 +33,7 @@
 
     "plugins": [
       "expo-router",
-      "@react-native-community/datetimepicker",
-      [
-        "react-native-iap",
-        {
-          "paymentProvider": "Apple"
-        }
-      ]
+      "@react-native-community/datetimepicker"
     ],
 
     "experiments": {

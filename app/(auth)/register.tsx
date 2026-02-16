@@ -1,3 +1,4 @@
+import * as AppleAuthentication from 'expo-apple-authentication';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -20,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 export default function RegisterScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { signUp } = useAuth();
+  const { signUp, signInWithApple } = useAuth();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -29,6 +30,19 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+
+  const handleAppleSignIn = async () => {
+    setAppleLoading(true);
+    setError(null);
+
+    const { error } = await signInWithApple();
+
+    if (error) {
+      setError('Erro ao entrar com Apple. Tente novamente.');
+    }
+    setAppleLoading(false);
+  };
 
   const handleRegister = async () => {
     // Validation
@@ -203,7 +217,7 @@ export default function RegisterScreen() {
                 { backgroundColor: colors.tint, opacity: loading ? 0.7 : 1 },
               ]}
               onPress={handleRegister}
-              disabled={loading}
+              disabled={loading || appleLoading}
             >
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -211,6 +225,32 @@ export default function RegisterScreen() {
                 <Text style={styles.buttonText}>Criar Conta</Text>
               )}
             </Pressable>
+
+            {/* Divider */}
+            <View style={styles.dividerContainer}>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+              <Text style={[styles.dividerText, { color: colors.textSecondary }]}>ou</Text>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+            </View>
+
+            {/* Apple Sign In */}
+            {appleLoading ? (
+              <View style={[styles.appleButtonContainer, { backgroundColor: colorScheme === 'dark' ? '#fff' : '#000' }]}>
+                <ActivityIndicator color={colorScheme === 'dark' ? '#000' : '#fff'} />
+              </View>
+            ) : (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                buttonStyle={
+                  colorScheme === 'dark'
+                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={12}
+                style={styles.appleButton}
+                onPress={handleAppleSignIn}
+              />
+            )}
           </View>
         </View>
       </ScrollView>
@@ -288,5 +328,28 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  dividerText: {
+    fontSize: 14,
+  },
+  appleButton: {
+    height: 52,
+    width: '100%',
+  },
+  appleButtonContainer: {
+    height: 52,
+    width: '100%',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
